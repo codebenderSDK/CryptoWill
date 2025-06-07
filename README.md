@@ -106,17 +106,6 @@ CryptoWill is a comprehensive smart contract wallet application designed to prev
    - Enable "Developer mode"
    - Click "Load unpacked" and select the extension folder
 
-### Production Distribution
-
-1. **Package Extension**:
-   ```bash
-   zip -r cryptowill-extension.zip cryptowill-extension/
-   ```
-
-2. **Submit to Stores**:
-   - Chrome Web Store: [Chrome Developer Dashboard](https://chrome.google.com/webstore/developer/dashboard)
-   - Firefox Add-ons: [Firefox Developer Hub](https://addons.mozilla.org/developers/)
-
 ## Configuration
 
 ### Contract Configuration
