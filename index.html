@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CryptoWill - Smart Contract Inheritance Wallet</title>
+    <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.development.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; padding: 0; width: 400px; height: 600px; }
+        .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000; }
+        .modal-content { position: relative; background: white; margin: 50px auto; padding: 20px; border-radius: 8px; max-width: 350px; max-height: 500px; overflow-y: auto; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // Contract ABI (simplified for demo)
+        const CONTRACT_ABI = [
+            "function owner() view returns (address)",
+            "function addBeneficiary(address, uint256, uint256, uint256, uint256)",
+            "function removeBeneficiary(address)",
+            "function sendLifeSign()",
+            "function setProofOfLifeInterval(uint256)",
+            "function depositERC20(address, uint256)",
+            "function withdrawERC20(address, uint256)",
+            "function claimERC20(address)",
+            "function getBeneficiaryCount() view returns (uint256)",
+            "function getBeneficiary(address) view returns (tuple(address wallet, uint256 erc20Percentage, uint256 erc721Percentage, uint256 erc1155Percentage, uint256 erc404Percentage, bool approved, bool exists))",
+            "function getERC20Balance(address) view returns (uint256)",
+            "function getInactivityStatus() view returns (bool triggered, uint256 triggeredAt, uint256 nextCheck)",
+            "function lastActivityTimestamp() view returns (uint256)",
+            "function proofOfLifeInterval() view returns (uint256)"
+        ];
+
+        const CONTRACT_ADDRESS = "0x742d35Cc6635C0532925a3b8D71FaC8BEE21aBe8"; // Replace with actual deployed address
+        const AVALANCHE_CHAIN_ID = "0xA86A"; // Avalanche C-Chain
+
+        function CryptoWillApp() {
+            const [account, setAccount] = useState('');
+            const [contract, setContract] = useState(null);
+            const [provider, setProvider] = useState(null);
+            const [signer, setSigner] = useState(null);
+            const [isConnected, setIsConnected] = useState(false);
+            const [currentModal, setCurrentModal] = useState('');
+            const [loading, setLoading] = useState(false);
+            
+            // App state
+            const [assetBalances, setAssetBalances] = useState([]);
+            const [beneficiaries, setBeneficiaries] = useState([]);
+            const [proofOfLifeData, setProofOfLifeData] = useState({});
+            const [inactivityStatus, setInactivityStatus] = useState({});
+
+            useEffect(() => {
+                checkConnection();
+            }, []);
+
+            const checkConnection = async () => {
+                if (typeof window.ethereum !== 'undefined') {
+                    try {
+                        const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+                        if (accounts.length > 0) {
+                            await connectWallet();
+                        }
+                    } catch (error) {
+                        console.error('Error checking connection:', error);
+                    }
+                }
+            };
+
+            const connectWallet = async () => {
+                try {
+                    if (typeof window.ethereum === 'undefined') {
+                        alert('Please install MetaMask!');
+                        return;
+                    }
+
+                    // Request account access
+                    const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+                    
+                    // Switch to Avalanche network
+                    try {
+                        await window.ethereum.request({
+                            method: 'wallet_switchEthereumChain',
+                            params: [{ chainId: AVALANCHE_CHAIN_ID }],
+                        });
+                    } catch (switchError) {
+                        if (switchError.code === 4902) {
+                            await window.ethereum.request({
+                                method: 'wallet_addEthereumChain',
+                                params: [{
+                                    chainId: AVALANCHE_CHAIN_ID,
+                                    chainName: 'Avalanche C-Chain',
+                                    nativeCurrency: {
+                                        name: 'AVAX',
+                                        symbol: 'AVAX',
+                                        decimals: 18
+                                    },
+                                    rpcUrls: ['https://api.avax.network/ext/bc/C/rpc'],
+                                    blockExplorerUrls: ['https://snowtrace.io/']
+                                }]
+                            });
+                        }
+                    }
+
+                    const web3Provider = new ethers.providers.Web3Provider(window.ethereum);
+                    const web3Signer = web3Provider.getSigner();
+                    const contractInstance = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, web3Signer);
+
+                    setAccount(accounts[0]);
+                    setProvider(web3Provider);
+                    setSigner(web3Signer);
+                    setContract(contractInstance);
+                    setIsConnected(true);
+
+                    await loadData(contractInstance);
+
+                } catch (error) {
+                    console.error('Error connecting wallet:', error);
+                    alert('Failed to connect wallet: ' + error.message);
+                }
+            };
+
+            const loadData = async (contractInstance) => {
+                try {
+                    setLoading(true);
+                    
+                    // Load proof of life data
+                    const lastActivity = await contractInstance.lastActivityTimestamp();
+                    const interval = await contractInstance.proofOfLifeInterval();
+                    const status = await contractInstance.getInactivityStatus();
+                    
+                    setProofOfLifeData({
+                        lastActivity: new Date(lastActivity.toNumber() * 1000),
+                        interval: interval.toNumber(),
+                        nextCheck: new Date((lastActivity.toNumber() + interval.toNumber()) * 1000)
+                    });
+
+                    setInactivityStatus({
+                        triggered: status.triggered,
+                        triggeredAt: status.triggeredAt.toNumber(),
+                        nextCheck: status.nextCheck.toNumber()
+                    });
+
+                } catch (error) {
+                    console.error('Error loading data:', error);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const sendLifeSign = async () => {
+                try {
+                    setLoading(true);
+                    const tx = await contract.sendLifeSign();
+                    await tx.wait();
+                    alert('Life sign sent successfully!');
+                    await loadData(contract);
+                } catch (error) {
+                    console.error('Error sending life sign:', error);
+                    alert('Failed to send life sign: ' + error.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const Modal = ({ isOpen, onClose, title, children }) => {
+                if (!isOpen) return null;
+
+                return (
+                    <div className="modal-overlay" onClick={onClose}>
+                        <div className="modal-content" onClick={e => e.stopPropagation()}>
+                            <div className="flex justify-between items-center mb-4">
+                                <h2 className="text-xl font-bold">{title}</h2>
+                                <button 
+                                    onClick={onClose}
+                                    className="text-gray-500 hover:text-gray-700 text-2xl"
+                                >
+                                    ×
+                                </button>
+                            </div>
+                            {children}
+                        </div>
+                    </div>
+                );
+            };
+
+            const AssetBalanceModal = () => {
+                const [selectedChain, setSelectedChain] = useState('avalanche');
+                const [balances, setBalances] = useState([]);
+
+                const chains = [
+                    { id: 'avalanche', name: 'Avalanche', color: 'bg-red-500' },
+                    { id: 'ethereum', name: 'Ethereum', color: 'bg-blue-500' },
+                    { id: 'polygon', name: 'Polygon', color: 'bg-purple-500' },
+                    { id: 'bsc', name: 'BSC', color: 'bg-yellow-500' }
+                ];
+
+                return (
+                    <div className="space-y-4">
+                        <div className="flex space-x-2 mb-4">
+                            {chains.map(chain => (
+                                <button
+                                    key={chain.id}
+                                    onClick={() => setSelectedChain(chain.id)}
+                                    className={`px-3 py-1 rounded text-white text-sm ${chain.color} ${
+                                        selectedChain === chain.id ? 'ring-2 ring-offset-1' : 'opacity-70'
+                                    }`}
+                                >
+                                    {chain.name}
+                                </button>
+                            ))}
+                        </div>
+                        
+                        <div className="space-y-2">
+                            <h3 className="font-semibold text-sm">Assets on {chains.find(c => c.id === selectedChain)?.name}</h3>
+                            <div className="bg-gray-50 p-3 rounded text-sm">
+                                <div className="flex justify-between">
+                                    <span>AVAX</span>
+                                    <span>0.00</span>
+                                </div>
+                                <div className="flex justify-between">
+                                    <span>USDC</span>
+                                    <span>0.00</span>
+                                </div>
+                                <div className="text-xs text-gray-500 mt-2">
+                                    Connect with CCIP to view cross-chain assets
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            const ProofOfLifeModal = () => {
+                const [newInterval, setNewInterval] = useState(90);
+
+                const updateInterval = async () => {
+                    try {
+                        setLoading(true);
+                        const tx = await contract.setProofOfLifeInterval(newInterval * 24 * 60 * 60); // Convert days to seconds
+                        await tx.wait();
+                        alert('Proof of life interval updated!');
+                        setCurrentModal('');
+                        await loadData(contract);
+                    } catch (error) {
+                        console.error('Error updating interval:', error);
+                        alert('Failed to update interval: ' + error.message);
+                    } finally {
+                        setLoading(false);
+                    }
+                };
+
+                return (
+                    <div className="space-y-4">
+                        <div className="bg-blue-50 p-3 rounded">
+                            <h3 className="font-semibold text-sm mb-2">Current Status</h3>
+                            <div className="text-xs space-y-1">
+                                <div>Last Activity: {proofOfLifeData.lastActivity?.toLocaleDateString()}</div>
+                                <div>Next Check: {proofOfLifeData.nextCheck?.toLocaleDateString()}</div>
+                                <div>Interval: {Math.floor(proofOfLifeData.interval / (24 * 60 * 60))} days</div>
+                            </div>
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="block text-sm font-medium">Update Interval (days)</label>
+                            <select 
+                                value={newInterval}
+                                onChange={(e) => setNewInterval(parseInt(e.target.value))}
+                                className="w-full border rounded px-2 py-1 text-sm"
+                            >
+                                <option value={30}>30 days</option>
+                                <option value={90}>90 days</option>
+                                <option value={180}>180 days</option>
+                                <option value={365}>365 days</option>
+                            </select>
+                        </div>
+
+                        <div className="flex space-x-2">
+                            <button
+                                onClick={updateInterval}
+                                disabled={loading}
+                                className="flex-1 bg-blue-500 text-white py-2 px-4 rounded text-sm hover:bg-blue-600 disabled:opacity-50"
+                            >
+                                Update Interval
+                            </button>
+                            <button
+                                onClick={sendLifeSign}
+                                disabled={loading}
+                                className="flex-1 bg-green-500 text-white py-2 px-4 rounded text-sm hover:bg-green-600 disabled:opacity-50"
+                            >
+                                Send Life Sign
+                            </button>
+                        </div>
+                    </div>
+                );
+            };
+
+            const BeneficiaryModal = () => {
+                const [beneficiaryAddress, setBeneficiaryAddress] = useState('');
+                const [allocations, setAllocations] = useState({
+                    erc20: 0, erc721: 0, erc1155: 0, erc404: 0
+                });
+
+                const addBeneficiary = async () => {
+                    try {
+                        if (!ethers.utils.isAddress(beneficiaryAddress)) {
+                            alert('Invalid address');
+                            return;
+                        }
+
+                        setLoading(true);
+                        const tx = await contract.addBeneficiary(
+                            beneficiaryAddress,
+                            allocations.erc20,
+                            allocations.erc721,
+                            allocations.erc1155,
+                            allocations.erc404
+                        );
+                        await tx.wait();
+                        alert('Beneficiary added successfully!');
+                        setBeneficiaryAddress('');
+                        setAllocations({ erc20: 0, erc721: 0, erc1155: 0, erc404: 0 });
+                    } catch (error) {
+                        console.error('Error adding beneficiary:', error);
+                        alert('Failed to add beneficiary: ' + error.message);
+                    } finally {
+                        setLoading(false);
+                    }
+                };
+
+                return (
+                    <div className="space-y-4">
+                        <div className="space-y-2">
+                            <label className="block text-sm font-medium">Beneficiary Address</label>
+                            <input
+                                type="text"
+                                value={beneficiaryAddress}
+                                onChange={(e) => setBeneficiaryAddress(e.target.value)}
+                                placeholder="0x..."
+                                className="w-full border rounded px-2 py-1 text-sm"
+                            />
+                        </div>
+
+                        <div className="space-y-3">
+                            <h3 className="font-semibold text-sm">Asset Allocations (%)</h3>
+                            {Object.entries(allocations).map(([type, value]) => (
+                                <div key={type} className="flex items-center justify-between">
+                                    <label className="text-sm capitalize">{type.replace('erc', 'ERC-')}</label>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        max="100"
+                                        value={value}
+                                        onChange={(e) => setAllocations({
+                                            ...allocations,
+                                            [type]: parseInt(e.target.value) || 0
+                                        })}
+                                        className="w-16 border rounded px-2 py-1 text-sm"
+                                    />
+                                </div>
+                            ))}
+                        </div>
+
+                        <button
+                            onClick={addBeneficiary}
+                            disabled={loading || !beneficiaryAddress}
+                            className="w-full bg-purple-500 text-white py-2 px-4 rounded text-sm hover:bg-purple-600 disabled:opacity-50"
+                        >
+                            Add Beneficiary
+                        </button>
+
+                        <div className="border-t pt-3">
+                            <h3 className="font-semibold text-sm mb-2">Current Beneficiaries</h3>
+                            <div className="text-xs text-gray-500">
+                                {beneficiaries.length === 0 ? 'No beneficiaries added yet' : `${beneficiaries.length} beneficiaries configured`}
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            const ClaimingModal = () => {
+                const [claimType, setClaimType] = useState('erc20');
+                const [tokenAddress, setTokenAddress] = useState('');
+
+                const checkClaimEligibility = async () => {
+                    try {
+                        const status = await contract.getInactivityStatus();
+                        if (!status.triggered) {
+                            alert('Inactivity period not triggered yet');
+                            return false;
+                        }
+                        return true;
+                    } catch (error) {
+                        console.error('Error checking eligibility:', error);
+                        return false;
+                    }
+                };
+
+                const claimAssets = async () => {
+                    try {
+                        const eligible = await checkClaimEligibility();
+                        if (!eligible) return;
+
+                        setLoading(true);
+                        let tx;
+                        
+                        switch (claimType) {
+                            case 'erc20':
+                                tx = await contract.claimERC20(tokenAddress);
+                                break;
+                            default:
+                                alert('Claim type not implemented yet');
+                                return;
+                        }
+
+                        await tx.wait();
+                        alert('Assets claimed successfully!');
+                    } catch (error) {
+                        console.error('Error claiming assets:', error);
+                        alert('Failed to claim assets: ' + error.message);
+                    } finally {
+                        setLoading(false);
+                    }
+                };
+
+                return (
+                    <div className="space-y-4">
+                        <div className="bg-yellow-50 p-3 rounded">
+                            <h3 className="font-semibold text-sm mb-2">Claim Eligibility</h3>
+                            <div className="text-xs">
+                                <div>Inactivity Status: {inactivityStatus.triggered ? 'Triggered' : 'Not Triggered'}</div>
+                                <div className="text-gray-600 mt-1">
+                                    Claims are only available after the inactivity period is triggered and the claim period has passed.
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="block text-sm font-medium">Asset Type</label>
+                            <select 
+                                value={claimType}
+                                onChange={(e) => setClaimType(e.target.value)}
+                                className="w-full border rounded px-2 py-1 text-sm"
+                            >
+                                <option value="erc20">ERC-20 Tokens</option>
+                                <option value="erc721">ERC-721 NFTs</option>
+                                <option value="erc1155">ERC-1155 Tokens</option>
+                                <option value="erc404">ERC-404 Tokens</option>
+                            </select>
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="block text-sm font-medium">Token Contract Address</label>
+                            <input
+                                type="text"
+                                value={tokenAddress}
+                                onChange={(e) => setTokenAddress(e.target.value)}
+                                placeholder="0x..."
+                                className="w-full border rounded px-2 py-1 text-sm"
+                            />
+                        </div>
+
+                        <button
+                            onClick={claimAssets}
+                            disabled={loading || !tokenAddress || !inactivityStatus.triggered}
+                            className="w-full bg-orange-500 text-white py-2 px-4 rounded text-sm hover:bg-orange-600 disabled:opacity-50"
+                        >
+                            Claim Assets
+                        </button>
+                    </div>
+                );
+            };
+
+            if (!isConnected) {
+                return (
+                    <div className="h-full flex flex-col items-center justify-center bg-gradient-to-br from-blue-50 to-purple-50 p-6">
+                        <div className="text-center space-y-4">
+                            <div className="w-16 h-16 mx-auto bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
+                                <span className="text-white text-2xl font-bold">₿</span>
+                            </div>
+                            <h1 className="text-2xl font-bold text-gray-800">CryptoWill</h1>
+                            <p className="text-sm text-gray-600">Smart Contract Inheritance Wallet</p>
+                            <button
+                                onClick={connectWallet}
+                                className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-6 py-3 rounded-lg font-medium hover:from-blue-600 hover:to-purple-700 transition-all"
+                            >
+                                Connect Wallet
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="h-full bg-gray-50">
+                    {/* Header */}
+                    <div className="bg-white shadow-sm p-4 border-b">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <h1 className="text-lg font-bold text-gray-800">CryptoWill</h1>
+                                <p className="text-xs text-gray-500">
+                                    {account.slice(0, 6)}...{account.slice(-4)}
+                                </p>
+                            </div>
+                            <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
+                                <span className="text-white text-sm font-bold">₿</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Main Content */}
+                    <div className="p-4 space-y-4">
+                        {/* Status Card */}
+                        <div className="bg-white rounded-lg p-4 shadow-sm">
+                            <h2 className="font-semibold text-sm mb-3">Wallet Status</h2>
+                            <div className="grid grid-cols-2 gap-3 text-xs">
+                                <div className="bg-green-50 p-2 rounded">
+                                    <div className="text-green-600 font-medium">Active</div>
+                                    <div className="text-gray-600">Last activity: Today</div>
+                                </div>
+                                <div className="bg-blue-50 p-2 rounded">
+                                    <div className="text-blue-600 font-medium">Protected</div>
+                                    <div className="text-gray-600">Beneficiaries: {beneficiaries.length}</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Quick Actions */}
+                        <div className="bg-white rounded-lg p-4 shadow-sm">
+                            <h2 className="font-semibold text-sm mb-3">Quick Actions</h2>
+                            <div className="grid grid-cols-2 gap-2">
+                                <button
+                                    onClick={sendLifeSign}
+                                    disabled={loading}
+                                    className="bg-green-100 text-green-700 p-3 rounded-lg text-xs font-medium hover:bg-green-200 disabled:opacity-50"
+                                >
+                                    Send Life Sign
+                                </button>
+                                <button
+                                    onClick={() => setCurrentModal('assets')}
+                                    className="bg-blue-100 text-blue-700 p-3 rounded-lg text-xs font-medium hover:bg-blue-200"
+                                >
+                                    View Assets
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Main Features */}
+                        <div className="space-y-2">
+                            <button
+                                onClick={() => setCurrentModal('proofOfLife')}
+                                className="w-full bg-white p-4 rounded-lg shadow-sm text-left hover:bg-gray-50"
+                            >
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <h3 className="font-medium text-sm">Proof of Life Settings</h3>
+                                        <p className="text-xs text-gray-500">Configure activity monitoring</p>
+                                    </div>
+                                    <span className="text-gray-400">→</span>
+                                </div>
+                            </button>
+
+                            <button
+                                onClick={() => setCurrentModal('beneficiaries')}
+                                className="w-full bg-white p-4 rounded-lg shadow-sm text-left hover:bg-gray-50"
+                            >
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <h3 className="font-medium text-sm">Manage Beneficiaries</h3>
+                                        <p className="text-xs text-gray-500">Add and configure inheritance</p>
+                                    </div>
+                                    <span className="text-gray-400">→</span>
+                                </div>
+                            </button>
+
+                            <button
+                                onClick={() => setCurrentModal('claiming')}
+                                className="w-full bg-white p-4 rounded-lg shadow-sm text-left hover:bg-gray-50"
+                            >
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <h3 className="font-medium text-sm">Claim Assets</h3>
+                                        <p className="text-xs text-gray-500">For beneficiaries to claim inheritance</p>
+                                    </div>
+                                    <span className="text-gray-400">→</span>
+                                </div>
+                            </button>
+                        </div>
+
+                        {/* Footer */}
+                        <div className="text-center pt-4">
+                            <p className="text-xs text-gray-400">
+                                Secured by Avalanche • Powered by Chainlink
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* Modals */}
+                    <Modal 
+                        isOpen={currentModal === 'assets'} 
+                        onClose={() => setCurrentModal('')}
+                        title="Multichain Assets"
+                    >
+                        <AssetBalanceModal />
+                    </Modal>
+
+                    <Modal 
+                        isOpen={currentModal === 'proofOfLife'} 
+                        onClose={() => setCurrentModal('')}
+                        title="Proof of Life Settings"
+                    >
+                        <ProofOfLifeModal />
+                    </Modal>
+
+                    <Modal 
+                        isOpen={currentModal === 'beneficiaries'} 
+                        onClose={() => setCurrentModal('')}
+                        title="Manage Beneficiaries"
+                    >
+                        <BeneficiaryModal />
+                    </Modal>
+
+                    <Modal 
+                        isOpen={currentModal === 'claiming'} 
+                        onClose={() => setCurrentModal('')}
+                        title="Claim Assets"
+                    >
+                        <ClaimingModal />
+                    </Modal>
+
+                    {/* Loading Overlay */}
+                    {loading && (
+                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                            <div className="bg-white p-4 rounded-lg">
+                                <div className="animate-spin w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full mx-auto"></div>
+                                <p className="text-sm text-gray-600 mt-2">Processing...</p>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        ReactDOM.render(<CryptoWillApp />, document.getElementById('root'));
+    </script>
+</body>
+</html>
