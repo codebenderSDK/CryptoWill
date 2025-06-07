@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "CryptoWill - Smart Contract Inheritance Wallet",
+  "version": "1.0.0",
+  "description": "Prevent loss of crypto funds through automated inheritance using smart contracts on Avalanche",
+  "permissions": [
+    "storage",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://*.avax.network/*",
+    "https://*.snowtrace.io/*",
+    "https://*.chainlink.com/*"
+  ],
+  "action": {
+    "default_popup": "index.html",
+    "default_title": "CryptoWill",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com https://cdn.tailwindcss.com; object-src 'self'"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["index.html"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
