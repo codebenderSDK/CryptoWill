@@ -1,5 +1,7 @@
 # CryptoWill - Smart Contract Inheritance Wallet
 
+![CryptoWill_Logo](./CryptoWill_Logo.png)
+
 ## Overview
 
 CryptoWill is a comprehensive smart contract wallet application designed to prevent loss of cryptocurrency funds due to death or disability. It uses Avalanche as the primary blockchain with Chainlink services for automation and cross-chain asset detection.
